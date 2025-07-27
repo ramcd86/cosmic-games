@@ -188,6 +188,31 @@ import { GameRoom, Player, Card, GameAction } from '@cosmic-games/shared';
                 </button>
               </div>
 
+              <!-- Knock Opportunity Notification -->
+              <div *ngIf="showKnockOpportunity" class="text-center mb-4 p-4 bg-yellow-600/20 border border-yellow-600 rounded-lg">
+                <div class="text-yellow-400 font-bold text-lg mb-2">
+                  🥊 Knock Opportunity!
+                </div>
+                <div class="text-white mb-2">
+                  You can knock with your current hand
+                </div>
+                <div class="text-yellow-300 text-sm mb-3">
+                  Time remaining: {{ knockCountdown }}s
+                </div>
+                <div class="space-x-2">
+                  <button 
+                    (click)="takeKnockOpportunity()"
+                    class="bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg transition-colors font-bold">
+                    Knock Now!
+                  </button>
+                  <button 
+                    (click)="ignoreKnockOpportunity()"
+                    class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg transition-colors">
+                    Ignore
+                  </button>
+                </div>
+              </div>
+
               <!-- Game Actions -->
               <div class="text-center space-x-4">
                 <button 
@@ -649,6 +674,11 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   // Card selection
   selectedCard: number | null = null;
+  
+  // Knock feature
+  knockOpportunityTimeout: any = null;
+  knockCountdown = 0;
+  showKnockOpportunity = false;
 
   constructor(
     private route: ActivatedRoute,
@@ -688,6 +718,9 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   ngOnDestroy() {
     // Cleanup subscriptions
     this.subscriptions.forEach(sub => sub.unsubscribe());
+    
+    // Clear knock opportunity timeout
+    this.clearKnockOpportunity();
     
     // Leave room and disconnect socket
     if (this.roomCode) {
@@ -899,7 +932,7 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         this.discardPile = room.gameState?.discardPile || [];
         this.deckCount = room.gameState?.deck?.length || 0;
         
-        // Debug discard pile changes
+        // Force UI update for discard pile
         if (previousDiscardPile.length !== this.discardPile.length) {
           console.log('🗑️ Discard pile updated:', {
             previous: previousDiscardPile.map(c => `${c.rank}${c.suit}`),
@@ -907,6 +940,19 @@ export class GameRoomComponent implements OnInit, OnDestroy {
             added: this.discardPile.length > previousDiscardPile.length ? 
               this.discardPile[this.discardPile.length - 1] : null
           });
+          
+          // Force Angular change detection for discard pile
+          setTimeout(() => {
+            this.discardPile = [...room.gameState?.discardPile || []];
+          }, 0);
+          
+          // Check for knock opportunity after discard pile updates
+          setTimeout(() => {
+            if (this.discardPile.length > previousDiscardPile.length) {
+              // Someone discarded a card, check if I can knock
+              this.startKnockOpportunity();
+            }
+          }, 100);
         }
       }
       
@@ -1218,6 +1264,46 @@ export class GameRoomComponent implements OnInit, OnDestroy {
     return this.gamePhase === 'playing' && 
            this.currentRoom?.gameState.currentPlayer === this.myPlayerId &&
            this.myCards.length > 0;
+  }
+
+  // Knock opportunity methods
+  takeKnockOpportunity(): void {
+    this.clearKnockOpportunity();
+    this.knockAction();
+  }
+
+  ignoreKnockOpportunity(): void {
+    this.clearKnockOpportunity();
+  }
+
+  private startKnockOpportunity(): void {
+    if (!this.canKnock()) return;
+    
+    this.showKnockOpportunity = true;
+    this.knockCountdown = 5;
+    
+    // Update countdown every second
+    const countdownInterval = setInterval(() => {
+      this.knockCountdown--;
+      if (this.knockCountdown <= 0) {
+        clearInterval(countdownInterval);
+        this.clearKnockOpportunity();
+      }
+    }, 1000);
+    
+    // Auto-hide after 5 seconds
+    this.knockOpportunityTimeout = setTimeout(() => {
+      this.clearKnockOpportunity();
+    }, 5000);
+  }
+
+  private clearKnockOpportunity(): void {
+    this.showKnockOpportunity = false;
+    this.knockCountdown = 0;
+    if (this.knockOpportunityTimeout) {
+      clearTimeout(this.knockOpportunityTimeout);
+      this.knockOpportunityTimeout = null;
+    }
   }
 
   // Card selection methods

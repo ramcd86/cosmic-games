@@ -250,3 +250,111 @@ GET    /api/players/stats      // Get statistics
 - **Mobile Apps**: Native iOS/Android applications
 - **Monetization**: Premium features, cosmetic upgrades
 - **Analytics**: Player behavior and game statistics
+
+## Development Log
+
+### Session: July 28, 2025 - AI Turn Flow & Visual Updates
+
+#### **Issues Reported**
+1. **Discard Pile Visual Updates**: AI players drawing and discarding cards, but discard pile not updating visually
+2. **Current Player Indicator**: Active player icon not moving to successive AI players during their turns
+3. **Turn Cycling**: After AI players complete turns, game not returning control to human player
+
+#### **Investigation & Diagnosis**
+
+**Backend Analysis:**
+- ✅ **Backend functioning correctly**: Extensive log analysis confirmed proper game flow
+- ✅ **AI players working**: Successfully drawing and discarding cards with realistic 2-4 second delays
+- ✅ **Discard pile updates**: Backend correctly updating discard pile (`🗑️ Discard pile after discard: [7♣, A♣, Q♠, K♠, K♣]`)
+- ✅ **Turn progression**: Current player correctly cycling through all players (123 → Tyler → Iris → Faith → back to 123)
+- ✅ **Room-updated events**: Backend emitting proper `room-updated` events after every game action
+- ✅ **Game state persistence**: Redis correctly storing and retrieving room state
+
+**Frontend Analysis:**
+- ❌ **Visual updates failing**: Despite backend sending correct data, frontend not reflecting changes
+- ❌ **Socket communication**: Frontend receiving room-updated events but not processing correctly
+- ❌ **Angular change detection**: UI not updating despite data changes
+
+#### **Attempted Solutions**
+
+**1. AI Turn Logic Optimization (Backend)**
+- **Race Condition Fixes**: Eliminated multiple simultaneous AI turn scheduling calls
+- **Atomic AI Turns**: Made AI draw+discard operations sequential instead of asynchronous
+- **Smart Scheduling**: Only schedule AI turns after human actions or AI discard actions (not AI draw actions)
+- **Enhanced Logging**: Added comprehensive debugging throughout AI turn flow
+
+**2. Frontend Visual Update Improvements**
+- **Forced Change Detection**: Added `setTimeout(() => { this.discardPile = [...newData]; }, 0)` for Angular refresh
+- **Enhanced Socket Logging**: Improved room-updated event debugging with detailed discard pile tracking
+- **Double Assignment Pattern**: Attempted multiple approaches to trigger UI updates
+
+**3. 5-Second Knock Opportunity Feature (NEW)**
+- **Visual Notification**: Yellow notification box with countdown timer
+- **Auto-trigger**: Appears when player can knock after any discard
+- **User Actions**: "Knock Now!" or "Ignore" buttons
+- **Timeout Handling**: Auto-dismisses after 5 seconds
+- **Integration**: Uses existing `knockAction()` method
+
+#### **Current Status**
+
+**✅ Backend Working Perfectly:**
+```
+🗑️ Discard pile after discard: [...cards...]
+👤 Moved to next player: player-id
+📡 Emitting room-updated after game action
+🤖 Processing AI turn for: PlayerName with X cards
+```
+
+**❌ Frontend Issues Persist:**
+1. **Discard pile visual updates still failing** - Cards not appearing in UI despite backend updates
+2. **Current player indicator not working** - Active player icon not moving between AI players  
+3. **Turn cycling broken** - Game not returning to human player after AI turns complete
+
+#### **Root Cause Analysis**
+
+The core issue appears to be a **frontend state synchronization problem** rather than backend logic issues. Possible causes:
+
+1. **Angular Change Detection**: Despite multiple attempted fixes, Angular may not be detecting the array changes
+2. **Socket Event Processing**: Room-updated events may be received but not properly applied to component state
+3. **State Management**: Component state may be getting overwritten or not properly bound to template
+4. **Timing Issues**: Rapid succession of updates may be causing race conditions in the frontend
+
+#### **Technical Debt & Recommendations**
+
+**Short-term:**
+- **Debug Angular Change Detection**: Use `ChangeDetectorRef.detectChanges()` explicitly
+- **Component State Debugging**: Add extensive logging to `updateRoomData()` method calls
+- **Event Stream Analysis**: Monitor the exact sequence of room-updated events in browser console
+
+**Medium-term:**
+- **State Management Refactor**: Consider NgRx or Akita for more predictable state management
+- **Component Architecture**: Split game room component into smaller, more focused components
+- **Real-time Testing**: Set up automated tests for socket event handling and UI updates
+
+**Long-term:**
+- **Framework Migration**: Consider React/Next.js if Angular change detection continues to be problematic
+- **Optimistic Updates**: Implement client-side prediction with server reconciliation
+- **Performance Monitoring**: Add metrics to track UI update latency and missed events
+
+#### **Files Modified**
+
+**Backend:**
+- `src/services/GameManager.ts`: AI turn logic improvements, atomic operations, enhanced scheduling
+- `src/handlers/SocketHandler.ts`: Enhanced room-updated event logging
+
+**Frontend:**
+- `src/app/services/socket.service.ts`: Improved room-updated event logging and debugging
+- `src/app/pages/game-room/game-room.component.ts`: 
+  - Added knock opportunity feature (5-second timer, UI notifications)
+  - Enhanced discard pile change detection and forced Angular updates
+  - Improved state management and event handling
+
+#### **Lessons Learned**
+
+1. **Backend-Frontend Separation**: Backend can work perfectly while frontend fails - importance of layer separation
+2. **Real-time Debugging**: Live log analysis crucial for identifying where the chain breaks
+3. **Angular Challenges**: Change detection can be finicky with complex object updates
+4. **Feature Addition Success**: New knock feature implemented successfully despite core issues
+5. **Technical Investigation**: Systematic debugging revealed precise failure points
+
+This development session highlighted the complexity of real-time multiplayer game development and the importance of robust state management patterns in frontend applications.

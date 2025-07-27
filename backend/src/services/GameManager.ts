@@ -458,20 +458,30 @@ export class GameManager {
     
     console.log('✅ Room saved successfully');
     
-    // After processing human player action, check if next player is AI
-    setTimeout(async () => {
-      try {
-        const updatedRoom = await this.redisService.getRoom(roomCode);
-        if (updatedRoom && updatedRoom.gameState.phase === 'playing') {
-          console.log('🤖 Checking for AI turn...');
-          await this.processAITurn(roomCode);
-        } else {
-          console.log('🤖 Skipping AI turn - game not active');
+    // After processing action, check if next player is AI
+    // Only schedule AI turn continuation for:
+    // 1. Human player actions (any type)
+    // 2. AI player discard actions (not draw actions, since draw+discard is now atomic)
+    const actionPlayer = room.players.find(p => p.id === playerId);
+    const shouldScheduleAITurn = !actionPlayer?.isAI || action.type === 'discard';
+    
+    if (shouldScheduleAITurn) {
+      setTimeout(async () => {
+        try {
+          const updatedRoom = await this.redisService.getRoom(roomCode);
+          if (updatedRoom && updatedRoom.gameState.phase === 'playing') {
+            console.log('🤖 Checking for AI turn after', action.type, 'by', actionPlayer?.isAI ? 'AI' : 'human');
+            await this.processAITurn(roomCode);
+          } else {
+            console.log('🤖 Skipping AI turn - game not active');
+          }
+        } catch (error) {
+          console.error('🤖 Error in AI turn timeout:', error);
         }
-      } catch (error) {
-        console.error('🤖 Error in AI turn timeout:', error);
-      }
-    }, 2000 + Math.random() * 2000); // 2-4 second delay before checking for AI turn
+      }, 2000 + Math.random() * 2000); // 2-4 second delay before checking for AI turn
+    } else {
+      console.log('🤖 Skipping AI turn scheduling - AI draw action (atomic turn in progress)');
+    }
 
     return room;
   }
@@ -577,42 +587,28 @@ export class GameManager {
         // Process the draw action
         await this.processGameAction(roomCode, currentPlayer.id, gameAction);
         
-        // After drawing, schedule the discard with a realistic delay
-        setTimeout(async () => {
-          try {
-            // Re-fetch room to ensure it's still valid and it's still this AI's turn
-            const latestRoom = await this.redisService.getRoom(roomCode);
-            if (!latestRoom || latestRoom.gameState.phase !== 'playing') {
-              console.log('🤖 Game no longer active, skipping AI discard');
-              return;
-            }
-            
-            // Make sure it's still the same AI player's turn
-            if (latestRoom.gameState.currentPlayer !== currentPlayer.id) {
-              console.log('🤖 No longer AI player turn, skipping discard');
-              return;
-            }
-            
-            // Also check if the AI player still has 11 cards (just drew)
-            const latestCurrentPlayer = latestRoom.players.find(p => p.id === currentPlayer.id);
-            if (!latestCurrentPlayer || latestCurrentPlayer.cards.length !== 11) {
-              console.log('🤖 AI player card count changed, skipping discard');
-              return;
-            }
-            
-            console.log('🤖 AI scheduling discard after draw...');
-            await this.processAITurn(roomCode); // Process discard phase
-          } catch (discardError) {
-            console.error('🤖 Error in AI discard phase:', discardError);
-          }
-        }, 2000 + Math.random() * 2000); // 2-4 second delay for realism
+        // Wait a realistic delay, then process discard immediately
+        await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 2000));
         
-      } else if (currentPlayer.cards.length === 11) {
-        // AI has drawn, now must discard
-        console.log('🤖 AI must discard, has', currentPlayer.cards.length, 'cards');
+        console.log('🤖 AI proceeding to discard after draw delay...');
         
-        const discardCard = aiPlayer.decideDiscard(room.gameState);
-        console.log('🤖 AI discarding:', discardCard);
+        // Re-fetch room to get updated state after draw
+        const updatedRoom = await this.redisService.getRoom(roomCode);
+        if (!updatedRoom || updatedRoom.gameState.phase !== 'playing') {
+          console.log('🤖 Game no longer active after draw');
+          return room;
+        }
+        
+        const updatedCurrentPlayer = updatedRoom.players.find(p => p.id === currentPlayer.id);
+        if (!updatedCurrentPlayer || updatedCurrentPlayer.cards.length !== 11) {
+          console.log('🤖 AI player state changed after draw, expected 11 cards, got:', updatedCurrentPlayer?.cards.length);
+          return updatedRoom;
+        }
+        
+        // Continue to discard with updated state
+        const updatedAiPlayer = new AIPlayer(updatedCurrentPlayer, updatedCurrentPlayer.difficulty!);
+        const discardCard = updatedAiPlayer.decideDiscard(updatedRoom.gameState);
+        console.log('🤖 AI discarding after delay:', discardCard);
         
         const discardAction: GameAction = {
           type: 'discard',
@@ -622,11 +618,28 @@ export class GameManager {
         };
         
         // Process the discard action (this will move to next player)
-        const updatedRoom = await this.processGameAction(roomCode, currentPlayer.id, discardAction);
+        await this.processGameAction(roomCode, currentPlayer.id, discardAction);
         return updatedRoom;
         
       } else {
         console.log('🤖 AI player has unexpected card count:', currentPlayer.cards.length);
+        // If AI has 11 cards, they must discard (this shouldn't happen with the new flow)
+        if (currentPlayer.cards.length === 11) {
+          console.log('🤖 AI has 11 cards, processing emergency discard...');
+          const discardCard = aiPlayer.decideDiscard(room.gameState);
+          console.log('🤖 AI emergency discarding:', discardCard);
+          
+          const discardAction: GameAction = {
+            type: 'discard',
+            playerId: currentPlayer.id,
+            card: discardCard,
+            timestamp: new Date()
+          };
+          
+          await this.processGameAction(roomCode, currentPlayer.id, discardAction);
+          return room;
+        }
+        
         // Something went wrong, just return the room
         return room;
       }
