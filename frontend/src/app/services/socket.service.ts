@@ -6,7 +6,8 @@ import {
   ServerToClientEvents, 
   GameRoom, 
   GameState, 
-  Player 
+  Player,
+  GameAction
 } from '@cosmic-games/shared';
 import { environment } from '../../environments/environment';
 
@@ -38,6 +39,7 @@ export class SocketService {
     playerId: string;
     playerName: string;
   } | null>(null);
+  private playerActionSubject = new BehaviorSubject<GameAction | null>(null);
 
   // Public observables
   public roomUpdated$ = this.roomUpdatedSubject.asObservable();
@@ -49,6 +51,7 @@ export class SocketService {
   public gameStarted$ = this.gameStartedSubject.asObservable();
   public gameEnded$ = this.gameEndedSubject.asObservable();
   public playerInfo$ = this.playerInfoSubject.asObservable();
+  public playerAction$ = this.playerActionSubject.asObservable();
 
   constructor() {}
 
@@ -154,7 +157,16 @@ export class SocketService {
     });
 
     this.socket.on('room-updated', (room: GameRoom) => {
-      this.roomUpdatedSubject.next(room);
+      try {
+        console.log('📡 Received room-updated:', room);
+        if (room && room.players && Array.isArray(room.players)) {
+          this.roomUpdatedSubject.next(room);
+        } else {
+          console.error('❌ Invalid room data received:', room);
+        }
+      } catch (error) {
+        console.error('❌ Error processing room-updated:', error, room);
+      }
     });
 
     this.socket.on('game-updated', (gameState: GameState) => {
@@ -192,6 +204,11 @@ export class SocketService {
         winnerId,
         finalScores
       });
+    });
+
+    (this.socket as any).on('player-action', (action: GameAction) => {
+      this.playerActionSubject.next(action);
+      console.log('📡 Received player action:', action);
     });
 
     // Temporarily commented until types are updated

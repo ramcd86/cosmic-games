@@ -256,6 +256,11 @@ export class AIPlayer {
   private cardLikelyNeededByOpponent(card: Card, gameState: any): boolean {
     // Analyze what cards opponent might need based on discards and draws
     // This is a simplified implementation
+    if (!gameState || !gameState.discardPile || !Array.isArray(gameState.discardPile)) {
+      // If no discard pile information available, assume card might be needed
+      return true;
+    }
+    
     const recentDiscards = gameState.discardPile.slice(-5);
     
     // If opponent recently discarded cards of same rank/suit, they might not need this

@@ -95,6 +95,7 @@ export interface ServerToClientEvents {
   'game-started': () => void;
   'game-ended': (winnerId: string, finalScores: Record<string, number>) => void;
   'player-info': (data: { playerId: string; playerName: string }) => void;
+  'player-action': (action: GameAction) => void;
 }
 
 // API Response types

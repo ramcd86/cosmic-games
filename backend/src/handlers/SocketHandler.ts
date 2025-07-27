@@ -10,6 +10,8 @@ export class SocketHandler {
   constructor(io: Server<ClientToServerEvents, ServerToClientEvents>, gameManager: GameManager) {
     this.io = io;
     this.gameManager = gameManager;
+    // Pass the socket server to GameManager for emitting player actions
+    this.gameManager.setSocketServer(io);
   }
 
   public initialize(): void {
@@ -100,12 +102,25 @@ export class SocketHandler {
       // Game action event
       socket.on('game-action', async (roomCode: string, action: GameAction) => {
         try {
+          console.log('🎮 Game action received:', { roomCode, action: action.type, playerId: action.playerId });
+          
           const session = this.playerSessions.get(socket.id);
-          if (!session) return;
+          if (!session) {
+            console.log('❌ No session found for socket:', socket.id);
+            return;
+          }
 
           const room = await this.gameManager.processGameAction(roomCode, session.playerId, action);
           
           if (room) {
+            console.log('📡 Emitting room-updated after game action:', {
+              roomCode,
+              roomExists: !!room,
+              playersCount: room.players?.length,
+              hasGameState: !!room.gameState,
+              players: room.players?.map(p => ({ id: p.id, name: p.name, cardsCount: p.cards?.length }))
+            });
+            
             this.io.to(roomCode).emit('room-updated', room);
             
             if (room.gameState && room.gameState.phase === 'finished') {
@@ -121,9 +136,12 @@ export class SocketHandler {
               
               this.io.to(roomCode).emit('game-ended', winner.id, finalScores);
             }
+          } else {
+            console.log('❌ No room returned from processGameAction');
           }
 
         } catch (error) {
+          console.error('❌ Error processing game action:', error);
           socket.emit('error', error instanceof Error ? error.message : 'Failed to process game action');
         }
       });

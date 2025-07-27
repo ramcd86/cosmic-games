@@ -13,10 +13,12 @@ import { RedisService } from './RedisService';
 import { GinRummyEngine } from '../game/GinRummyEngine';
 import { AIPlayer } from '../game/AIPlayer';
 import { v4 as uuidv4 } from 'uuid';
+import { Server } from 'socket.io';
 
 export class GameManager {
   private static instance: GameManager;
   private redisService: RedisService;
+  private io: Server | null = null;
 
   private constructor() {
     this.redisService = RedisService.getInstance();
@@ -27,6 +29,17 @@ export class GameManager {
       GameManager.instance = new GameManager();
     }
     return GameManager.instance;
+  }
+
+  public setSocketServer(io: Server): void {
+    this.io = io;
+  }
+
+  private emitPlayerAction(roomCode: string, action: GameAction): void {
+    if (this.io) {
+      this.io.to(roomCode).emit('player-action', action);
+      console.log('📡 Emitted player action:', { roomCode, action: action.type, playerId: action.playerId });
+    }
   }
 
   /**
@@ -384,21 +397,34 @@ export class GameManager {
    * Process a game action
    */
   public async processGameAction(roomCode: string, playerId: string, action: GameAction): Promise<GameRoom> {
+    console.log('🎮 processGameAction called:', { roomCode, playerId, actionType: action.type });
+    
     const room = await this.redisService.getRoom(roomCode);
     if (!room) {
+      console.log('❌ Room not found:', roomCode);
       throw new Error('Room not found');
     }
 
     if (room.gameState.phase !== 'playing') {
+      console.log('❌ Game not in progress, phase:', room.gameState.phase);
       throw new Error('Game is not in progress');
     }
 
-    // Validate the move using the game engine
-    const validation = GinRummyEngine.isValidMove(room.gameState, playerId, action);
+    console.log('🔍 Validating move with GinRummyEngine...');
+    // Validate the move using the game engine - pass the room, not just gameState
+    const validation = GinRummyEngine.isValidMove(room, playerId, action);
+    console.log('🔍 Validation result:', validation);
+    
     if (!validation.valid) {
+      console.log('❌ Move validation failed:', validation.reason);
       throw new Error(validation.reason || 'Invalid move');
     }
 
+    console.log('✅ Move validation passed, processing action...');
+    
+    // Emit player action for visual feedback
+    this.emitPlayerAction(roomCode, action);
+    
     // Process the action based on type
     switch (action.type) {
       case 'draw':
@@ -420,15 +446,32 @@ export class GameManager {
     room.gameState.lastAction = action;
     room.lastActivity = new Date();
 
+    console.log('🔄 Saving room after action processing:', {
+      roomCode,
+      phase: room.gameState.phase,
+      currentPlayer: room.gameState.currentPlayer,
+      playersCount: room.players.length,
+      players: room.players.map(p => ({ id: p.id, name: p.name, cardsCount: p.cards?.length }))
+    });
+
     await this.redisService.saveRoom(room);
+    
+    console.log('✅ Room saved successfully');
     
     // After processing human player action, check if next player is AI
     setTimeout(async () => {
-      const updatedRoom = await this.redisService.getRoom(roomCode);
-      if (updatedRoom) {
-        await this.processAITurn(roomCode);
+      try {
+        const updatedRoom = await this.redisService.getRoom(roomCode);
+        if (updatedRoom && updatedRoom.gameState.phase === 'playing') {
+          console.log('🤖 Checking for AI turn...');
+          await this.processAITurn(roomCode);
+        } else {
+          console.log('🤖 Skipping AI turn - game not active');
+        }
+      } catch (error) {
+        console.error('🤖 Error in AI turn timeout:', error);
       }
-    }, 500); // Small delay before AI turn
+    }, 2000 + Math.random() * 2000); // 2-4 second delay before checking for AI turn
 
     return room;
   }
@@ -488,55 +531,111 @@ export class GameManager {
    * Process AI player turns
    */
   public async processAITurn(roomCode: string): Promise<GameRoom | null> {
-    const room = await this.redisService.getRoom(roomCode);
-    if (!room || room.gameState.phase !== 'playing') {
-      return room;
-    }
-
-    const currentPlayer = room.players.find(p => p.id === room.gameState.currentPlayer);
-    if (!currentPlayer || !currentPlayer.isAI) {
-      return room;
-    }
-
     try {
+      console.log('🤖 processAITurn called for room:', roomCode);
+      
+      const room = await this.redisService.getRoom(roomCode);
+      if (!room) {
+        console.log('❌ Room not found for AI turn:', roomCode);
+        return null;
+      }
+      
+      if (room.gameState.phase !== 'playing') {
+        console.log('❌ Game not in playing phase:', room.gameState.phase);
+        return room;
+      }
+
+      const currentPlayer = room.players.find(p => p.id === room.gameState.currentPlayer);
+      if (!currentPlayer) {
+        console.log('❌ Current player not found:', room.gameState.currentPlayer);
+        return room;
+      }
+      
+      if (!currentPlayer.isAI) {
+        console.log('🎯 Current player is not AI:', currentPlayer.name);
+        return room;
+      }
+
+      console.log('🤖 Processing AI turn for:', currentPlayer.name, 'with', currentPlayer.cards.length, 'cards');
+
       // Create AI player instance
       const aiPlayer = new AIPlayer(currentPlayer, currentPlayer.difficulty!);
       
-      // Get AI decision
-      const action = aiPlayer.decideAction(room.gameState);
-      
-      // Create game action
-      const gameAction: GameAction = {
-        type: action.type,
-        playerId: currentPlayer.id,
-        card: action.card,
-        timestamp: new Date()
-      };
+      // AI turn logic: Draw first (if they haven't drawn yet), then discard
+      if (currentPlayer.cards.length === 10) {
+        // AI hasn't drawn yet, decide what to draw
+        const action = aiPlayer.decideAction(room.gameState);
+        console.log('🤖 AI decided to draw:', action.type);
+        
+        // Create draw action
+        const gameAction: GameAction = {
+          type: 'draw',
+          playerId: currentPlayer.id,
+          timestamp: new Date()
+        };
 
-      // Process the action
-      const updatedRoom = await this.processGameAction(roomCode, currentPlayer.id, gameAction);
-      
-      // If AI drew a card, it needs to discard
-      if (action.type === 'draw') {
-        // Small delay for realism
+        // Process the draw action
+        await this.processGameAction(roomCode, currentPlayer.id, gameAction);
+        
+        // After drawing, schedule the discard with a realistic delay
         setTimeout(async () => {
-          const discardCard = aiPlayer.decideDiscard(updatedRoom.gameState);
-          const discardAction: GameAction = {
-            type: 'discard',
-            playerId: currentPlayer.id,
-            card: discardCard,
-            timestamp: new Date()
-          };
-          
-          await this.processGameAction(roomCode, currentPlayer.id, discardAction);
-        }, 1000 + Math.random() * 2000); // 1-3 second delay
+          try {
+            // Re-fetch room to ensure it's still valid and it's still this AI's turn
+            const latestRoom = await this.redisService.getRoom(roomCode);
+            if (!latestRoom || latestRoom.gameState.phase !== 'playing') {
+              console.log('🤖 Game no longer active, skipping AI discard');
+              return;
+            }
+            
+            // Make sure it's still the same AI player's turn
+            if (latestRoom.gameState.currentPlayer !== currentPlayer.id) {
+              console.log('🤖 No longer AI player turn, skipping discard');
+              return;
+            }
+            
+            // Also check if the AI player still has 11 cards (just drew)
+            const latestCurrentPlayer = latestRoom.players.find(p => p.id === currentPlayer.id);
+            if (!latestCurrentPlayer || latestCurrentPlayer.cards.length !== 11) {
+              console.log('🤖 AI player card count changed, skipping discard');
+              return;
+            }
+            
+            console.log('🤖 AI scheduling discard after draw...');
+            await this.processAITurn(roomCode); // Process discard phase
+          } catch (discardError) {
+            console.error('🤖 Error in AI discard phase:', discardError);
+          }
+        }, 2000 + Math.random() * 2000); // 2-4 second delay for realism
+        
+      } else if (currentPlayer.cards.length === 11) {
+        // AI has drawn, now must discard
+        console.log('🤖 AI must discard, has', currentPlayer.cards.length, 'cards');
+        
+        const discardCard = aiPlayer.decideDiscard(room.gameState);
+        console.log('🤖 AI discarding:', discardCard);
+        
+        const discardAction: GameAction = {
+          type: 'discard',
+          playerId: currentPlayer.id,
+          card: discardCard,
+          timestamp: new Date()
+        };
+        
+        // Process the discard action (this will move to next player)
+        const updatedRoom = await this.processGameAction(roomCode, currentPlayer.id, discardAction);
+        return updatedRoom;
+        
+      } else {
+        console.log('🤖 AI player has unexpected card count:', currentPlayer.cards.length);
+        // Something went wrong, just return the room
+        return room;
       }
 
-      return updatedRoom;
+      return room;
       
     } catch (error) {
-      console.error('Error processing AI turn:', error);
-      return room;
+      console.error('🤖 Error processing AI turn:', error);
+      return null;
     }
   }
 
@@ -576,18 +675,53 @@ export class GameManager {
   }
 
   private async handleDiscardAction(room: GameRoom, playerId: string, action: GameAction): Promise<void> {
+    console.log('🎯 handleDiscardAction called:', {
+      playerId,
+      actionCard: action.card,
+      actionType: action.type
+    });
+    
     const player = room.players.find(p => p.id === playerId);
-    if (!player || !action.card) throw new Error('Invalid discard action');
+    if (!player || !action.card) {
+      console.log('❌ Invalid discard action:', { player: !!player, actionCard: !!action.card });
+      throw new Error('Invalid discard action');
+    }
+
+    console.log('🃏 Player cards before discard:', player.cards.map(c => ({ id: c.id, rank: c.rank, suit: c.suit })));
+    console.log('🗑️ Trying to discard card:', { id: action.card.id, rank: action.card.rank, suit: action.card.suit });
 
     const cardIndex = player.cards.findIndex(c => c.id === action.card!.id);
-    if (cardIndex === -1) throw new Error('Card not in hand');
+    console.log('🔍 Card index found:', cardIndex);
+    
+    if (cardIndex === -1) {
+      console.log('❌ Card not found in hand - trying rank/suit match');
+      // Try to find by rank and suit if ID doesn't match
+      const cardIndexBySuit = player.cards.findIndex(c => 
+        c.rank === action.card!.rank && c.suit === action.card!.suit
+      );
+      console.log('🔍 Card index by rank/suit:', cardIndexBySuit);
+      
+      if (cardIndexBySuit === -1) {
+        throw new Error('Card not in hand');
+      } else {
+        // Remove card from player's hand and add to discard pile
+        const discardedCard = player.cards.splice(cardIndexBySuit, 1)[0];
+        room.gameState.discardPile.push(discardedCard);
+        console.log('✅ Card discarded by rank/suit match');
+      }
+    } else {
+      // Remove card from player's hand and add to discard pile
+      const discardedCard = player.cards.splice(cardIndex, 1)[0];
+      room.gameState.discardPile.push(discardedCard);
+      console.log('✅ Card discarded by ID match');
+    }
 
-    // Remove card from player's hand and add to discard pile
-    const discardedCard = player.cards.splice(cardIndex, 1)[0];
-    room.gameState.discardPile.push(discardedCard);
+    console.log('🃏 Player cards after discard:', player.cards.map(c => ({ id: c.id, rank: c.rank, suit: c.suit })));
+    console.log('🗑️ Discard pile after discard:', room.gameState.discardPile.map(c => ({ id: c.id, rank: c.rank, suit: c.suit })));
 
     // Move to next player
     this.moveToNextPlayer(room);
+    console.log('👤 Moved to next player:', room.gameState.currentPlayer);
   }
 
   private async handleKnockAction(room: GameRoom, playerId: string): Promise<void> {

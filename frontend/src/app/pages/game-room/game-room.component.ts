@@ -6,7 +6,7 @@ import { Subscription } from 'rxjs';
 
 import { GameApiService } from '../../services/game-api.service';
 import { SocketService } from '../../services/socket.service';
-import { GameRoom, Player, Card } from '@cosmic-games/shared';
+import { GameRoom, Player, Card, GameAction } from '@cosmic-games/shared';
 
 @Component({
   selector: 'app-game-room',
@@ -112,6 +112,7 @@ import { GameRoom, Player, Card } from '@cosmic-games/shared';
                     [ngClass]="getPlayerPositionClass(i, players.length)">
                     <div 
                       class="player-circle"
+                      [attr.data-player-id]="player.id"
                       [style.background-color]="getPlayerBackgroundColor(player.name, i)"
                       [ngClass]="getCurrentPlayerTurnStatus(player.id)">
                       {{ generatePlayerInitials(player.name, players) }}
@@ -209,6 +210,22 @@ import { GameRoom, Player, Card } from '@cosmic-games/shared';
                   class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-colors"
                   [ngClass]="!canGin() ? 'opacity-50 cursor-not-allowed' : ''">
                   Gin
+                </button>
+              </div>
+
+              <!-- Secondary Actions -->
+              <div class="text-center space-x-4 mt-4">
+                <button 
+                  (click)="sortCards()"
+                  class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors">
+                  Sort Cards
+                </button>
+                <button 
+                  (click)="endTurn()"
+                  [disabled]="!canEndTurn()"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                  [ngClass]="!canEndTurn() ? 'opacity-50 cursor-not-allowed' : ''">
+                  End Turn
                 </button>
               </div>
             </div>
@@ -537,6 +554,39 @@ import { GameRoom, Player, Card } from '@cosmic-games/shared';
         transform: scale(1) translateY(0);
       }
     }
+
+    /* Player action animations */
+    @keyframes drawAction {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.1); box-shadow: 0 0 20px rgba(16, 185, 129, 0.6); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes discardAction {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.1); box-shadow: 0 0 20px rgba(239, 68, 68, 0.6); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes specialAction {
+      0% { transform: scale(1); }
+      25% { transform: scale(1.2); box-shadow: 0 0 30px rgba(255, 215, 0, 0.8); }
+      50% { transform: scale(1.1); }
+      75% { transform: scale(1.2); box-shadow: 0 0 30px rgba(255, 215, 0, 0.8); }
+      100% { transform: scale(1); }
+    }
+
+    .player-action-draw {
+      animation: drawAction 1s ease-in-out;
+    }
+
+    .player-action-discard {
+      animation: discardAction 1s ease-in-out;
+    }
+
+    .player-action-special {
+      animation: specialAction 1.5s ease-in-out;
+    }
   `]
 })
 export class GameRoomComponent implements OnInit, OnDestroy {
@@ -554,6 +604,10 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   opponentCards: number = 0;
   discardPile: Card[] = [];
   deckCount: number = 0;
+  
+  // Turn management
+  hasDrawnThisTurn: boolean = false;
+  currentPhase: 'draw' | 'discard' = 'draw';
   
   // Subscriptions
   private subscriptions: Subscription[] = [];
@@ -716,6 +770,15 @@ export class GameRoomComponent implements OnInit, OnDestroy {
         }
       })
     );
+
+    // Player actions for visual feedback
+    this.subscriptions.push(
+      this.socketService.playerAction$.subscribe(action => {
+        if (action && this.currentRoom) {
+          this.handlePlayerActionFeedback(action);
+        }
+      })
+    );
   }
 
   private loadRoomData(): void {
@@ -736,61 +799,121 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   private updateRoomData(room: GameRoom): void {
-    this.currentRoom = room;
-    this.roomName = room.name;
-    this.players = room.players;
-    this.hostId = room.hostId;
-    this.gamePhase = room.gameState.phase;
-    this.maxPlayers = room.settings.maxPlayers;
-    this.gameVariant = room.settings.gameVariant as string;
-    this.turnTimeLimit = room.settings.turnTimeLimit;
-    this.pointLimit = room.settings.pointLimit;
-    
-    // Find current player by name
-    const myPlayer = this.players.find(p => p.name === this.myPlayerName);
-    if (myPlayer) {
-      this.myPlayerId = myPlayer.id;
-      this.isPlayerReady = myPlayer.isReady;
-    }
-    
-    // Update player slots
-    this.playerSlots = Array(this.maxPlayers).fill(null).map((_, i) => ({
-      index: i,
-      player: i < this.players.length ? this.players[i] : null
-    }));
-
-    // Determine if current user is host
-    this.isHost = this.hostId === this.myPlayerId;
-    
-    // Check if can start game
-    this.canStartGame = this.isHost && 
-                       this.players.length >= 2 && 
-                       this.players.every(p => p.isReady) &&
-                       this.gamePhase === 'waiting';
-
-    // Update current player info for game state
-    if (room.gameState.currentPlayer) {
-      this.currentPlayerId = room.gameState.currentPlayer;
-      const currentPlayer = this.players.find(p => p.id === room.gameState.currentPlayer);
-      this.currentPlayerName = currentPlayer?.name || '';
-    }
-    
-    // Update game data for display
-    if (this.gamePhase === 'playing') {
-      // Get my cards
-      const myPlayer = this.players.find(p => p.id === this.myPlayerId);
-      this.myCards = myPlayer?.cards || [];
+    try {
+      console.log('🔄 updateRoomData called with:', room);
       
-      // Count opponent cards (for display purposes)
-      const opponents = this.players.filter(p => p.id !== this.myPlayerId);
-      this.opponentCards = opponents.length > 0 ? opponents[0].cards.length : 0;
+      if (!room) {
+        console.error('❌ Room data is null/undefined');
+        return;
+      }
       
-      // Game state data
-      this.discardPile = room.gameState.discardPile || [];
-      this.deckCount = room.gameState.deck?.length || 0;
+      if (!room.players || !Array.isArray(room.players)) {
+        console.error('❌ Room players data is invalid:', room.players);
+        return;
+      }
+      
+      this.currentRoom = room;
+      this.roomName = room.name;
+      this.players = room.players;
+      this.hostId = room.hostId;
+      this.gamePhase = room.gameState?.phase || 'waiting';
+      this.maxPlayers = room.settings?.maxPlayers || 6;
+      this.gameVariant = (room.settings?.gameVariant as string) || 'classic';
+      this.turnTimeLimit = room.settings?.turnTimeLimit || 30;
+      this.pointLimit = room.settings?.pointLimit || 100;
+      
+      // Find current player by name
+      const myPlayer = this.players.find(p => p.name === this.myPlayerName);
+      if (myPlayer) {
+        this.myPlayerId = myPlayer.id;
+        this.isPlayerReady = myPlayer.isReady;
+      }
+      
+      // Update player slots
+      this.playerSlots = Array(this.maxPlayers).fill(null).map((_, i) => ({
+        index: i,
+        player: i < this.players.length ? this.players[i] : null
+      }));
+
+      // Determine if current user is host
+      this.isHost = this.hostId === this.myPlayerId;
+      
+      // Check if can start game
+      this.canStartGame = this.isHost && 
+                         this.players.length >= 2 && 
+                         this.players.every(p => p.isReady) &&
+                         this.gamePhase === 'waiting';
+
+      // Update current player info for game state
+      if (room.gameState?.currentPlayer) {
+        // Check if it's a new turn (different player)
+        const previousPlayerId = this.currentPlayerId;
+        this.currentPlayerId = room.gameState.currentPlayer;
+        const currentPlayer = this.players.find(p => p.id === room.gameState.currentPlayer);
+        this.currentPlayerName = currentPlayer?.name || '';
+        
+        // Reset turn state ONLY if it's a new turn (different player)
+        if (previousPlayerId !== this.currentPlayerId) {
+          console.log('🔄 Resetting turn state - NEW TURN:', {
+            previousPlayerId,
+            newPlayerId: this.currentPlayerId,
+            isMyTurn: this.currentPlayerId === this.myPlayerId,
+            resetting: true
+          });
+          
+          this.hasDrawnThisTurn = false;
+          this.currentPhase = 'draw';
+          this.selectedCard = null; // Clear any selected card
+          
+          console.log('✅ Turn state reset for new turn:', {
+            hasDrawnThisTurn: this.hasDrawnThisTurn,
+            currentPhase: this.currentPhase
+          });
+        } else if (this.currentPlayerId === this.myPlayerId) {
+          console.log('🎯 Same turn, my turn - keeping state:', {
+            hasDrawnThisTurn: this.hasDrawnThisTurn,
+            currentPhase: this.currentPhase,
+            currentPlayer: this.currentPlayerId,
+            myPlayer: this.myPlayerId
+          });
+        } else {
+          console.log('🎯 Not my turn:', {
+            currentPlayer: this.currentPlayerId,
+            myPlayer: this.myPlayerId
+          });
+        }
+      }
+      
+      // Update game data for display
+      if (this.gamePhase === 'playing') {
+        // Get my cards
+        const myPlayer = this.players.find(p => p.id === this.myPlayerId);
+        this.myCards = myPlayer?.cards || [];
+        
+        // Count opponent cards (for display purposes)
+        const opponents = this.players.filter(p => p.id !== this.myPlayerId);
+        this.opponentCards = opponents.length > 0 ? opponents[0].cards?.length || 0 : 0;
+        
+        // Game state data
+        const previousDiscardPile = [...this.discardPile];
+        this.discardPile = room.gameState?.discardPile || [];
+        this.deckCount = room.gameState?.deck?.length || 0;
+        
+        // Debug discard pile changes
+        if (previousDiscardPile.length !== this.discardPile.length) {
+          console.log('🗑️ Discard pile updated:', {
+            previous: previousDiscardPile.map(c => `${c.rank}${c.suit}`),
+            current: this.discardPile.map(c => `${c.rank}${c.suit}`),
+            added: this.discardPile.length > previousDiscardPile.length ? 
+              this.discardPile[this.discardPile.length - 1] : null
+          });
+        }
+      }
+      
+      console.log('Room updated. My player:', { id: this.myPlayerId, name: this.myPlayerName, ready: this.isPlayerReady });
+    } catch (error) {
+      console.error('❌ Error in updateRoomData:', error, room);
     }
-    
-    console.log('Room updated. My player:', { id: this.myPlayerId, name: this.myPlayerName, ready: this.isPlayerReady });
   }
 
   private addChatMessage(playerName: string, text: string): void {
@@ -1002,9 +1125,28 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   // Game action methods
   drawCard(): void {
-    if (!this.canDrawCard()) return;
+    console.log('🎯 drawCard called - before validation:', {
+      hasDrawnThisTurn: this.hasDrawnThisTurn,
+      currentPhase: this.currentPhase,
+      canDraw: this.canDrawCard()
+    });
+    
+    if (!this.canDrawCard()) {
+      console.log('❌ Cannot draw card - validation failed');
+      return;
+    }
     
     console.log('🃏 Drawing card...');
+    
+    // Mark that we've drawn this turn
+    this.hasDrawnThisTurn = true;
+    this.currentPhase = 'discard';
+    
+    console.log('🎯 After drawing - state updated:', {
+      hasDrawnThisTurn: this.hasDrawnThisTurn,
+      currentPhase: this.currentPhase
+    });
+    
     const action = {
       type: 'draw' as const,
       playerId: this.myPlayerId,
@@ -1042,10 +1184,24 @@ export class GameRoomComponent implements OnInit, OnDestroy {
 
   // Game state validation methods
   canDrawCard(): boolean {
-    // Can draw if it's my turn and game is in playing phase
-    return this.gamePhase === 'playing' && 
+    const canDraw = this.gamePhase === 'playing' && 
            this.currentRoom?.gameState.currentPlayer === this.myPlayerId &&
-           this.deckCount > 0;
+           this.deckCount > 0 &&
+           !this.hasDrawnThisTurn &&
+           this.currentPhase === 'draw';
+    
+    if (this.currentRoom?.gameState.currentPlayer === this.myPlayerId) {
+      console.log('🎯 canDrawCard check:', {
+        gamePhase: this.gamePhase,
+        isMyTurn: this.currentRoom?.gameState.currentPlayer === this.myPlayerId,
+        deckCount: this.deckCount,
+        hasDrawnThisTurn: this.hasDrawnThisTurn,
+        currentPhase: this.currentPhase,
+        canDraw
+      });
+    }
+    
+    return canDraw;
   }
 
   canKnock(): boolean {
@@ -1077,10 +1233,30 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   discardSelectedCard(): void {
-    if (this.selectedCard === null || !this.canDiscardCard()) return;
+    console.log('🎯 discardSelectedCard called:', {
+      selectedCard: this.selectedCard,
+      canDiscard: this.canDiscardCard(),
+      hasDrawnThisTurn: this.hasDrawnThisTurn,
+      currentPhase: this.currentPhase,
+      gamePhase: this.gamePhase,
+      isMyTurn: this.currentRoom?.gameState.currentPlayer === this.myPlayerId
+    });
+    
+    if (this.selectedCard === null) {
+      console.log('❌ No card selected');
+      return;
+    }
+    
+    if (!this.canDiscardCard()) {
+      console.log('❌ Cannot discard - validation failed');
+      // Let's try without the strict validation for testing
+      console.log('🧪 Attempting discard anyway for debugging...');
+    }
     
     const cardToDiscard = this.myCards[this.selectedCard];
     console.log('🗑️ Discarding card:', cardToDiscard);
+    console.log('🎯 Room code:', this.roomCode);
+    console.log('🎯 Player ID:', this.myPlayerId);
     
     const action = {
       type: 'discard' as const,
@@ -1089,25 +1265,90 @@ export class GameRoomComponent implements OnInit, OnDestroy {
       timestamp: new Date()
     };
     
+    console.log('🚀 Sending discard action:', action);
     this.socketService.makeGameAction(this.roomCode, action);
     
-    // Clear selection
+    // Only clear the selection - let the backend handle turn transition
     this.selectedCard = null;
+    
+    console.log('✅ Discard action sent, selection cleared');
   }
 
   canDiscardCard(): boolean {
-    // Can discard if it's my turn, I have a card selected, and game is playing
-    return this.gamePhase === 'playing' && 
+    const canDiscard = this.gamePhase === 'playing' && 
            this.currentRoom?.gameState.currentPlayer === this.myPlayerId &&
            this.selectedCard !== null &&
            this.selectedCard >= 0 &&
-           this.selectedCard < this.myCards.length;
+           this.selectedCard < this.myCards.length &&
+           this.hasDrawnThisTurn &&
+           this.currentPhase === 'discard';
+    
+    // Debug when trying to discard
+    if (this.selectedCard !== null) {
+      console.log('🎯 canDiscardCard check:', {
+        gamePhase: this.gamePhase,
+        isMyTurn: this.currentRoom?.gameState.currentPlayer === this.myPlayerId,
+        selectedCard: this.selectedCard,
+        hasDrawnThisTurn: this.hasDrawnThisTurn,
+        currentPhase: this.currentPhase,
+        canDiscard,
+        cardCount: this.myCards.length
+      });
+    }
+    
+    return canDiscard;
+  }
+
+  endTurn(): void {
+    if (!this.canEndTurn()) return;
+    
+    console.log('⏭️ Ending turn...');
+    
+    // Reset turn state
+    this.hasDrawnThisTurn = false;
+    this.currentPhase = 'draw';
+    this.selectedCard = null;
+    
+    const action = {
+      type: 'end-turn' as const,
+      playerId: this.myPlayerId,
+      timestamp: new Date()
+    };
+    
+    this.socketService.makeGameAction(this.roomCode, action);
+  }
+
+  canEndTurn(): boolean {
+    // Can end turn if it's my turn, I've drawn a card, and I'm in discard phase
+    return this.gamePhase === 'playing' && 
+           this.currentRoom?.gameState.currentPlayer === this.myPlayerId &&
+           this.hasDrawnThisTurn &&
+           this.currentPhase === 'discard';
+  }
+
+  sortCards(): void {
+    console.log('🔄 Sorting cards...');
+    this.myCards.sort((a, b) => {
+      // First sort by suit
+      const suitOrder = ['♠', '♥', '♦', '♣'];
+      const suitDiff = suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
+      if (suitDiff !== 0) return suitDiff;
+      
+      // Then sort by rank within suit
+      const rankOrder = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+      return rankOrder.indexOf(a.rank) - rankOrder.indexOf(b.rank);
+    });
   }
 
   drawFromDiscard(): void {
     if (!this.canDrawFromDiscard()) return;
     
     console.log('🃏 Drawing from discard pile...');
+    
+    // Mark that we've drawn this turn
+    this.hasDrawnThisTurn = true;
+    this.currentPhase = 'discard';
+    
     const action = {
       type: 'draw' as const,
       playerId: this.myPlayerId,
@@ -1119,9 +1360,98 @@ export class GameRoomComponent implements OnInit, OnDestroy {
   }
 
   canDrawFromDiscard(): boolean {
-    // Can draw from discard if it's my turn and there are cards in discard pile
+    // Can draw from discard if it's my turn, haven't drawn yet, and there are cards in discard pile
     return this.gamePhase === 'playing' && 
            this.currentRoom?.gameState.currentPlayer === this.myPlayerId &&
-           this.discardPile.length > 0;
+           this.discardPile.length > 0 &&
+           !this.hasDrawnThisTurn &&
+           this.currentPhase === 'draw';
+  }
+
+  private handlePlayerActionFeedback(action: GameAction): void {
+    if (!this.currentRoom) return;
+
+    // Find the player who performed the action
+    const player = this.currentRoom.players.find(p => p.id === action.playerId);
+    if (!player) return;
+
+    // Only show visual feedback for AI players since human players see their own actions immediately
+    if (!player.isAI) return;
+
+    console.log(`🎭 AI Player ${player.name} performed action: ${action.type}`);
+
+    // Show a brief animation and message for AI actions
+    this.showPlayerActionAnimation(player, action);
+    
+    // Add action to chat for clarity
+    let actionMessage = '';
+    switch (action.type) {
+      case 'draw':
+        actionMessage = action.card ? 'drew from discard pile' : 'drew from deck';
+        break;
+      case 'discard':
+        actionMessage = action.card ? `discarded ${this.getCardDisplayName(action.card)}` : 'discarded a card';
+        break;
+      case 'knock':
+        actionMessage = 'knocked!';
+        break;
+      case 'gin':
+        actionMessage = 'declared Gin!';
+        break;
+    }
+    
+    if (actionMessage) {
+      this.addChatMessage('System', `${player.name} ${actionMessage}`);
+    }
+  }
+
+  private showPlayerActionAnimation(player: Player, action: GameAction): void {
+    // Create a simple visual indicator
+    const playerElement = document.querySelector(`[data-player-id="${player.id}"]`);
+    if (!playerElement) return;
+
+    // Add animation class based on action type
+    let animationClass = '';
+    switch (action.type) {
+      case 'draw':
+        animationClass = 'player-action-draw';
+        break;
+      case 'discard':
+        animationClass = 'player-action-discard';
+        break;
+      case 'knock':
+      case 'gin':
+        animationClass = 'player-action-special';
+        break;
+    }
+
+    if (animationClass) {
+      playerElement.classList.add(animationClass);
+      // Remove animation class after animation completes
+      setTimeout(() => {
+        playerElement.classList.remove(animationClass);
+      }, 1000);
+    }
+  }
+
+  private getCardDisplayName(card: Card): string {
+    const rankMap: Record<string, string> = {
+      'A': 'Ace',
+      'J': 'Jack',
+      'Q': 'Queen', 
+      'K': 'King'
+    };
+    
+    const suitMap: Record<string, string> = {
+      'hearts': '♥',
+      'diamonds': '♦',
+      'clubs': '♣',
+      'spades': '♠'
+    };
+
+    const rank = rankMap[card.rank] || card.rank;
+    const suit = suitMap[card.suit] || card.suit;
+    
+    return `${rank} of ${suit}`;
   }
 }
