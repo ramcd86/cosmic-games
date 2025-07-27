@@ -146,6 +146,27 @@ dump.rdb
 # Only exists if Bazel was run
 /bazel-out
 
+# Angular cache and build files
+/.angular/cache/
+/.angular/
+/frontend/.angular/cache/
+/frontend/.angular/
+/frontend/dist/
+/frontend/build/
+
+# Backend build outputs
+/backend/dist/
+/backend/build/
+
+# Webpack and build caches
+.webpack/
+webpack-cache/
+**/webpack-cache/
+
+# Babel cache
+**/babel-webpack/
+**/.babel-cache/
+
 # IDEs and editors
 /.idea
 .project
@@ -171,6 +192,23 @@ dump.rdb
 /libpeerconnection.log
 testem.log
 /typings
+
+# Additional cache and temporary directories
+**/cache/
+**/.cache/
+**/tmp/
+**/temp/
+**/.tmp/
+**/.temp/
+
+# Package manager cache
+.yarn/cache/
+.pnpm/
+pnpm-lock.yaml
+package-lock.json
+
+# Editor and IDE cache
+**/.vscode/ipch/
 
 # System files
 Thumbs.db
