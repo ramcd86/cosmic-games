@@ -1,0 +1,145 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Casino-inspired custom styles */
+@layer base {
+  html {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+  }
+  
+  body {
+    @apply bg-casino-black text-casino-silver;
+    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.1) 1px, transparent 0);
+    background-size: 20px 20px;
+  }
+}
+
+@layer components {
+  .casino-table {
+    @apply bg-casino-green bg-felt-texture rounded-2xl shadow-casino;
+    background-blend-mode: overlay;
+  }
+
+  .casino-button {
+    @apply bg-gradient-to-r from-casino-gold to-casino-bronze text-casino-black font-bold py-3 px-6 rounded-lg shadow-gold transition-all duration-300 hover:shadow-lg hover:scale-105;
+    background-size: 200% 100%;
+    animation: gold-shine 2s linear infinite;
+  }
+
+  .casino-button:hover {
+    @apply from-casino-bronze to-casino-gold;
+  }
+
+  .casino-button:disabled {
+    @apply from-gray-400 to-gray-500 text-gray-600 cursor-not-allowed;
+    animation: none;
+  }
+
+  .casino-card {
+    @apply bg-card-background border border-gray-300 rounded-lg shadow-card transition-transform duration-200 hover:scale-105;
+    aspect-ratio: 2.5/3.5;
+    perspective: 1000px;
+  }
+
+  .casino-panel {
+    @apply bg-casino-charcoal/80 backdrop-blur-sm border border-casino-silver/20 rounded-xl p-6;
+  }
+
+  .casino-input {
+    @apply bg-casino-charcoal border border-casino-silver/30 rounded-lg px-4 py-2 text-casino-silver placeholder-casino-silver/50 focus:border-casino-gold focus:outline-none focus:ring-2 focus:ring-casino-gold/20;
+  }
+
+  .text-gold {
+    @apply text-casino-gold;
+  }
+
+  .text-silver {
+    @apply text-casino-silver;
+  }
+
+  .chip {
+    @apply rounded-full border-4 shadow-lg transition-transform duration-200 hover:scale-110;
+  }
+
+  .chip-red {
+    @apply bg-red-600 border-red-800 text-white;
+  }
+
+  .chip-blue {
+    @apply bg-blue-600 border-blue-800 text-white;
+  }
+
+  .chip-green {
+    @apply bg-green-600 border-green-800 text-white;
+  }
+
+  .chip-black {
+    @apply bg-gray-900 border-gray-700 text-white;
+  }
+}
+
+@layer utilities {
+  .felt-green {
+    background: linear-gradient(135deg, #0F4C3A 0%, #2D5A47 100%);
+  }
+
+  .text-glow {
+    text-shadow: 0 0 10px currentColor;
+  }
+
+  .border-glow {
+    box-shadow: 0 0 10px currentColor;
+  }
+
+  /* Player Frame Colors */
+  .player-frame-red {
+    border: 3px solid #ef4444;
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+  }
+  
+  .player-frame-blue {
+    border: 3px solid #3b82f6;
+    box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+  }
+  
+  .player-frame-green {
+    border: 3px solid #10b981;
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.5);
+  }
+  
+  .player-frame-purple {
+    border: 3px solid #8b5cf6;
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.5);
+  }
+  
+  .player-frame-orange {
+    border: 3px solid #f97316;
+    box-shadow: 0 0 15px rgba(249, 115, 22, 0.5);
+  }
+  
+  .player-frame-pink {
+    border: 3px solid #ec4899;
+    box-shadow: 0 0 15px rgba(236, 72, 153, 0.5);
+  }
+  
+  .player-frame-yellow {
+    border: 3px solid #eab308;
+    box-shadow: 0 0 15px rgba(234, 179, 8, 0.5);
+  }
+  
+  .player-frame-cyan {
+    border: 3px solid #06b6d4;
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.5);
+  }
+
+  /* Player Name Colors */
+  .player-name-red { color: #ef4444; }
+  .player-name-blue { color: #3b82f6; }
+  .player-name-green { color: #10b981; }
+  .player-name-purple { color: #8b5cf6; }
+  .player-name-orange { color: #f97316; }
+  .player-name-pink { color: #ec4899; }
+  .player-name-yellow { color: #eab308; }
+  .player-name-cyan { color: #06b6d4; }
+}
