@@ -193,14 +193,6 @@ export class SocketService {
 
     this.socket.on('room-updated', (room: GameRoom) => {
       try {
-        console.log('📡 Received room-updated:', {
-          roomId: room.id,
-          playersCount: room.players?.length,
-          currentPlayer: room.gameState?.currentPlayer,
-          discardPileLength: room.gameState?.discardPile?.length,
-          discardPileTop: room.gameState?.discardPile?.length > 0 ? 
-            room.gameState.discardPile[room.gameState.discardPile.length - 1] : null
-        });
         if (room && room.players && Array.isArray(room.players)) {
           this.roomUpdatedSubject.next(room);
         } else {
@@ -259,12 +251,10 @@ export class SocketService {
       }>;
     }) => {
       this.gameEndedSubject.next(data);
-      console.log('🏁 Game ended:', data);
     });
 
     (this.socket as any).on('player-action', (action: GameAction) => {
       this.playerActionSubject.next(action);
-      console.log('📡 Received player action:', action);
     });
 
     // Temporarily commented until types are updated

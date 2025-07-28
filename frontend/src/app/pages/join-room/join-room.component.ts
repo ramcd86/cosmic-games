@@ -136,11 +136,6 @@ export class JoinRoomComponent {
       localStorage.setItem('activeRoomCode', this.roomCode);
       localStorage.setItem('sessionTimestamp', Date.now().toString());
       
-      console.log('Joining room:', {
-        roomCode: this.roomCode,
-        playerName: this.playerName
-      });
-
       // Save to recent rooms
       this.saveRecentRoom(this.roomCode);
       
