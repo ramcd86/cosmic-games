@@ -32,8 +32,21 @@ export class SocketService {
   private errorSubject = new BehaviorSubject<string | null>(null);
   private gameStartedSubject = new BehaviorSubject<boolean>(false);
   private gameEndedSubject = new BehaviorSubject<{
-    winnerId: string;
-    finalScores: Record<string, number>;
+    reason: 'deck-empty' | 'knock' | 'gin' | 'player-left';
+    message: string;
+    finalScores: Array<{
+      playerId: string;
+      playerName: string;
+      deadwoodValue: number;
+      totalScore: number;
+      isWinner: boolean;
+    }>;
+    winners: Array<{
+      id: string;
+      name: string;
+      deadwoodValue: number;
+      totalScore: number;
+    }>;
   } | null>(null);
   private playerInfoSubject = new BehaviorSubject<{
     playerId: string;
@@ -66,6 +79,28 @@ export class SocketService {
     });
 
     this.setupEventListeners();
+  }
+
+  /**
+   * Wait for socket connection to be established
+   */
+  waitForConnection(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.connected) {
+        resolve();
+        return;
+      }
+
+      const checkConnection = () => {
+        if (this.connected) {
+          resolve();
+        } else {
+          setTimeout(checkConnection, 100);
+        }
+      };
+      
+      checkConnection();
+    });
   }
 
   /**
@@ -206,11 +241,25 @@ export class SocketService {
       this.gameStartedSubject.next(true);
     });
 
-    this.socket.on('game-ended', (winnerId: string, finalScores: Record<string, number>) => {
-      this.gameEndedSubject.next({
-        winnerId,
-        finalScores
-      });
+    this.socket.on('game-ended', (data: {
+      reason: 'deck-empty' | 'knock' | 'gin' | 'player-left';
+      message: string;
+      finalScores: Array<{
+        playerId: string;
+        playerName: string;
+        deadwoodValue: number;
+        totalScore: number;
+        isWinner: boolean;
+      }>;
+      winners: Array<{
+        id: string;
+        name: string;
+        deadwoodValue: number;
+        totalScore: number;
+      }>;
+    }) => {
+      this.gameEndedSubject.next(data);
+      console.log('🏁 Game ended:', data);
     });
 
     (this.socket as any).on('player-action', (action: GameAction) => {

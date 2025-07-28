@@ -66,7 +66,7 @@ export class AIPlayer {
   /**
    * Determine if AI should knock
    */
-  private shouldKnock(analysis: any, gameState: any): boolean {
+  public shouldKnock(analysis: any, gameState: any): boolean {
     const { deadwoodValue, canKnock } = analysis;
     
     if (!canKnock) return false;

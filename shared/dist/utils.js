@@ -127,7 +127,7 @@ exports.isValidRoomCode = isValidRoomCode;
  */
 function createDefaultRoomSettings() {
     return {
-        maxPlayers: 6,
+        maxPlayers: 4, // Gin Rummy optimal for 2-4 players (52 card deck limit)
         allowSpectators: true,
         isPrivate: false,
         gameVariant: 'classic',

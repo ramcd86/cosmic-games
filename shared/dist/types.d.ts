@@ -41,6 +41,14 @@ export interface GameState {
     lastAction?: GameAction;
     startedAt?: Date;
     finishedAt?: Date;
+    endReason?: 'deck-empty' | 'knock' | 'gin' | 'player-left';
+    finalScores?: Array<{
+        playerId: string;
+        playerName: string;
+        deadwoodValue: number;
+        totalScore: number;
+        isWinner: boolean;
+    }>;
 }
 export interface RoomSettings {
     maxPlayers: number;
@@ -77,11 +85,28 @@ export interface ServerToClientEvents {
     'chat-received': (playerId: string, playerName: string, message: string, timestamp: Date) => void;
     'error': (message: string) => void;
     'game-started': () => void;
-    'game-ended': (winnerId: string, finalScores: Record<string, number>) => void;
+    'game-ended': (data: {
+        reason: 'deck-empty' | 'knock' | 'gin' | 'player-left';
+        message: string;
+        finalScores: Array<{
+            playerId: string;
+            playerName: string;
+            deadwoodValue: number;
+            totalScore: number;
+            isWinner: boolean;
+        }>;
+        winners: Array<{
+            id: string;
+            name: string;
+            deadwoodValue: number;
+            totalScore: number;
+        }>;
+    }) => void;
     'player-info': (data: {
         playerId: string;
         playerName: string;
     }) => void;
+    'player-action': (action: GameAction) => void;
 }
 export interface ApiResponse<T = any> {
     success: boolean;

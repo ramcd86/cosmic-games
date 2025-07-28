@@ -39,6 +39,9 @@ export class SocketHandler {
             roomCode: roomCode
           });
           
+          console.log(`✅ Session created - Socket: ${socket.id}, Player: ${player.name} (${player.id}), Room: ${roomCode}`);
+          console.log(`📊 Total active sessions: ${this.playerSessions.size}`);
+          
           console.log(`Player ${playerName} (${player.id}) joined room ${roomCode} via socket ${socket.id}`);
           
           // Join socket room for broadcasting
@@ -123,19 +126,7 @@ export class SocketHandler {
             
             this.io.to(roomCode).emit('room-updated', room);
             
-            if (room.gameState && room.gameState.phase === 'finished') {
-              // Game ended
-              const winner = room.players.reduce((prev, current) => 
-                (prev.score > current.score) ? prev : current
-              );
-              
-              const finalScores: Record<string, number> = {};
-              room.players.forEach(player => {
-                finalScores[player.name] = player.score;
-              });
-              
-              this.io.to(roomCode).emit('game-ended', winner.id, finalScores);
-            }
+            // Note: Game end handling is now done in GameManager.endGameDueToEmptyDeck()
           } else {
             console.log('❌ No room returned from processGameAction');
           }
@@ -149,7 +140,12 @@ export class SocketHandler {
       // Player ready event
       socket.on('player-ready', async (roomCode: string) => {
         try {
+          console.log(`🔍 Player ready request - Socket: ${socket.id}, Room: ${roomCode}`);
+          
           const session = this.playerSessions.get(socket.id);
+          console.log(`🔍 Session found:`, session ? `Player: ${session.playerName} (${session.playerId})` : 'No session');
+          console.log(`🔍 Total sessions:`, this.playerSessions.size);
+          
           if (!session) {
             socket.emit('error', 'Player session not found');
             return;

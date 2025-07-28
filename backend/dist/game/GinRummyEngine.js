@@ -236,23 +236,36 @@ class GinRummyEngine {
     /**
      * Check if a move is valid
      */
-    static isValidMove(gameState, playerId, action) {
-        if (gameState.currentPlayer !== playerId) {
+    static isValidMove(room, // GameRoom with players and gameState
+    playerId, action) {
+        if (room.gameState.currentPlayer !== playerId) {
             return { valid: false, reason: 'Not your turn' };
         }
         switch (action.type) {
             case 'draw':
-                if (gameState.deck.length === 0 && gameState.discardPile.length === 0) {
+                if (room.gameState.deck.length === 0 && room.gameState.discardPile.length === 0) {
                     return { valid: false, reason: 'No cards available to draw' };
+                }
+                const drawPlayer = room.players.find((p) => p.id === playerId);
+                if (!drawPlayer) {
+                    return { valid: false, reason: 'Player not found' };
+                }
+                // Player should have 10 cards before drawing (normal hand size)
+                if (drawPlayer.cards.length !== 10) {
+                    return { valid: false, reason: 'Must have exactly 10 cards to draw' };
                 }
                 return { valid: true };
             case 'discard':
                 if (!action.card) {
                     return { valid: false, reason: 'No card specified for discard' };
                 }
-                const player = gameState.players.find((p) => p.id === playerId);
+                const player = room.players.find((p) => p.id === playerId);
                 if (!player) {
                     return { valid: false, reason: 'Player not found' };
+                }
+                // Player should have 11 cards before discarding (after drawing)
+                if (player.cards.length !== 11) {
+                    return { valid: false, reason: 'Must draw a card before discarding' };
                 }
                 if (!player.cards.some((c) => c.id === action.card.id)) {
                     return { valid: false, reason: 'Card not in hand' };
@@ -260,7 +273,7 @@ class GinRummyEngine {
                 return { valid: true };
             case 'knock':
             case 'gin':
-                const knockPlayer = gameState.players.find((p) => p.id === playerId);
+                const knockPlayer = room.players.find((p) => p.id === playerId);
                 if (!knockPlayer) {
                     return { valid: false, reason: 'Player not found' };
                 }

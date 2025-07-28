@@ -42,6 +42,20 @@ export class GameManager {
     }
   }
 
+  private emitRoomUpdate(roomCode: string, room: GameRoom): void {
+    if (this.io) {
+      console.log('📡 Emitting room-updated after AI action:', {
+        roomCode,
+        roomExists: !!room,
+        playersCount: room.players?.length,
+        hasGameState: !!room.gameState,
+        players: room.players?.map(p => ({ id: p.id, name: p.name, cardsCount: p.cards?.length }))
+      });
+      
+      this.io.to(roomCode).emit('room-updated', room);
+    }
+  }
+
   /**
    * Create a new game room
    */
@@ -422,6 +436,17 @@ export class GameManager {
 
     console.log('✅ Move validation passed, processing action...');
     
+    // Add detailed logging for AI vs Human players
+    const currentActionPlayer = room.players.find(p => p.id === playerId);
+    console.log('🎭 Player action details:', {
+      playerName: currentActionPlayer?.name,
+      isAI: currentActionPlayer?.isAI,
+      actionType: action.type,
+      cardInvolved: action.card ? `${action.card.rank}${action.card.suit}` : 'none',
+      playerCardCount: currentActionPlayer?.cards?.length,
+      currentPlayer: room.gameState.currentPlayer === playerId ? 'YES' : 'NO'
+    });
+    
     // Emit player action for visual feedback
     this.emitPlayerAction(roomCode, action);
     
@@ -478,7 +503,7 @@ export class GameManager {
         } catch (error) {
           console.error('🤖 Error in AI turn timeout:', error);
         }
-      }, 2000 + Math.random() * 2000); // 2-4 second delay before checking for AI turn
+      }, 0); // Removed delay for faster testing
     } else {
       console.log('🤖 Skipping AI turn scheduling - AI draw action (atomic turn in progress)');
     }
@@ -571,26 +596,62 @@ export class GameManager {
       // Create AI player instance
       const aiPlayer = new AIPlayer(currentPlayer, currentPlayer.difficulty!);
       
-      // AI turn logic: Draw first (if they haven't drawn yet), then discard
+      // PHASE 1: Check for knock opportunity (if previous player discarded)
+      // This should happen before drawing, just like human players
+      if (room.gameState.discardPile.length > 0) {
+        const analysis = GinRummyEngine.analyzeHand(currentPlayer.cards);
+        if (aiPlayer.shouldKnock(analysis, room.gameState)) {
+          console.log('🤖 AI deciding to knock on opportunity');
+          
+          const knockAction: GameAction = {
+            type: 'knock',
+            playerId: currentPlayer.id,
+            timestamp: new Date()
+          };
+          
+          // Process knock action through unified interface
+          await this.processGameAction(roomCode, currentPlayer.id, knockAction);
+          const knockRoom = await this.redisService.getRoom(roomCode);
+          if (knockRoom) {
+            this.emitRoomUpdate(roomCode, knockRoom);
+          }
+          return knockRoom;
+        }
+      }
+      
+      // PHASE 2: Draw phase (same as human players)
       if (currentPlayer.cards.length === 10) {
         // AI hasn't drawn yet, decide what to draw
-        const action = aiPlayer.decideAction(room.gameState);
-        console.log('🤖 AI decided to draw:', action.type);
+        const decision = aiPlayer.decideAction(room.gameState);
+        console.log('🤖 AI decided action:', decision);
         
-        // Create draw action
-        const gameAction: GameAction = {
-          type: 'draw',
-          playerId: currentPlayer.id,
-          timestamp: new Date()
-        };
+        let drawAction: GameAction;
+        
+        if (decision.drawFromDiscard && room.gameState.discardPile.length > 0) {
+          // Draw from discard pile
+          const topCard = room.gameState.discardPile[room.gameState.discardPile.length - 1];
+          drawAction = {
+            type: 'draw',
+            playerId: currentPlayer.id,
+            card: topCard,
+            timestamp: new Date()
+          };
+          console.log('🤖 AI drawing from discard pile:', topCard);
+        } else {
+          // Draw from deck
+          drawAction = {
+            type: 'draw',
+            playerId: currentPlayer.id,
+            timestamp: new Date()
+          };
+          console.log('🤖 AI drawing from deck');
+        }
 
-        // Process the draw action
-        await this.processGameAction(roomCode, currentPlayer.id, gameAction);
+        // Process the draw action through unified interface
+        await this.processGameAction(roomCode, currentPlayer.id, drawAction);
         
-        // Wait a realistic delay, then process discard immediately
-        await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 2000));
-        
-        console.log('🤖 AI proceeding to discard after draw delay...');
+        // Removed delay for faster testing
+        await new Promise(resolve => setTimeout(resolve, 0));
         
         // Re-fetch room to get updated state after draw
         const updatedRoom = await this.redisService.getRoom(roomCode);
@@ -600,34 +661,40 @@ export class GameManager {
         }
         
         const updatedCurrentPlayer = updatedRoom.players.find(p => p.id === currentPlayer.id);
-        if (!updatedCurrentPlayer || updatedCurrentPlayer.cards.length !== 11) {
-          console.log('🤖 AI player state changed after draw, expected 11 cards, got:', updatedCurrentPlayer?.cards.length);
+        if (!updatedCurrentPlayer) {
+          console.log('🤖 AI player not found after draw');
           return updatedRoom;
         }
-        
-        // Continue to discard with updated state
-        const updatedAiPlayer = new AIPlayer(updatedCurrentPlayer, updatedCurrentPlayer.difficulty!);
-        const discardCard = updatedAiPlayer.decideDiscard(updatedRoom.gameState);
-        console.log('🤖 AI discarding after delay:', discardCard);
-        
-        const discardAction: GameAction = {
-          type: 'discard',
-          playerId: currentPlayer.id,
-          card: discardCard,
-          timestamp: new Date()
-        };
-        
-        // Process the discard action (this will move to next player)
-        await this.processGameAction(roomCode, currentPlayer.id, discardAction);
-        return updatedRoom;
-        
-      } else {
-        console.log('🤖 AI player has unexpected card count:', currentPlayer.cards.length);
-        // If AI has 11 cards, they must discard (this shouldn't happen with the new flow)
-        if (currentPlayer.cards.length === 11) {
-          console.log('🤖 AI has 11 cards, processing emergency discard...');
-          const discardCard = aiPlayer.decideDiscard(room.gameState);
-          console.log('🤖 AI emergency discarding:', discardCard);
+
+        // PHASE 3: Discard phase (same as human players)
+        if (updatedCurrentPlayer.cards.length === 11) {
+          console.log('🤖 AI proceeding to discard phase with 11 cards');
+          
+          // Create new AI instance with updated player state
+          const updatedAiPlayer = new AIPlayer(updatedCurrentPlayer, updatedCurrentPlayer.difficulty!);
+          
+          // Check if AI should knock with new hand before discarding
+          const updatedAnalysis = GinRummyEngine.analyzeHand(updatedCurrentPlayer.cards);
+          if (updatedAiPlayer.shouldKnock(updatedAnalysis, updatedRoom.gameState)) {
+            console.log('🤖 AI deciding to knock after drawing');
+            
+            const knockAction: GameAction = {
+              type: 'knock',
+              playerId: currentPlayer.id,
+              timestamp: new Date()
+            };
+            
+            await this.processGameAction(roomCode, currentPlayer.id, knockAction);
+            const knockRoom2 = await this.redisService.getRoom(roomCode);
+            if (knockRoom2) {
+              this.emitRoomUpdate(roomCode, knockRoom2);
+            }
+            return knockRoom2;
+          }
+          
+          // Decide which card to discard
+          const discardCard = updatedAiPlayer.decideDiscard(updatedRoom.gameState);
+          console.log('🤖 AI discarding:', discardCard);
           
           const discardAction: GameAction = {
             type: 'discard',
@@ -636,15 +703,41 @@ export class GameManager {
             timestamp: new Date()
           };
           
+          // Process the discard action through unified interface
           await this.processGameAction(roomCode, currentPlayer.id, discardAction);
-          return room;
+          const finalRoom = await this.redisService.getRoom(roomCode);
+          if (finalRoom) {
+            this.emitRoomUpdate(roomCode, finalRoom);
+          }
+          return finalRoom;
+        } else {
+          console.log('🤖 AI player unexpected card count after draw:', updatedCurrentPlayer.cards.length);
+          return updatedRoom;
         }
         
-        // Something went wrong, just return the room
+      } else if (currentPlayer.cards.length === 11) {
+        // Emergency discard if AI somehow has 11 cards already
+        console.log('🤖 AI has 11 cards, processing emergency discard...');
+        const discardCard = aiPlayer.decideDiscard(room.gameState);
+        console.log('🤖 AI emergency discarding:', discardCard);
+        
+        const discardAction: GameAction = {
+          type: 'discard',
+          playerId: currentPlayer.id,
+          card: discardCard,
+          timestamp: new Date()
+        };
+        
+        await this.processGameAction(roomCode, currentPlayer.id, discardAction);
+        const emergencyRoom = await this.redisService.getRoom(roomCode);
+        if (emergencyRoom) {
+          this.emitRoomUpdate(roomCode, emergencyRoom);
+        }
+        return emergencyRoom;
+      } else {
+        console.log('🤖 AI player has unexpected card count:', currentPlayer.cards.length);
         return room;
       }
-
-      return room;
       
     } catch (error) {
       console.error('🤖 Error processing AI turn:', error);
@@ -678,13 +771,45 @@ export class GameManager {
     const player = room.players.find(p => p.id === playerId);
     if (!player) throw new Error('Player not found');
 
-    if (room.gameState.deck.length === 0) {
-      throw new Error('Deck is empty');
-    }
+    if (action.card) {
+      // Draw from discard pile (specific card provided)
+      if (room.gameState.discardPile.length === 0) {
+        throw new Error('Discard pile is empty');
+      }
+      
+      const topCard = room.gameState.discardPile[room.gameState.discardPile.length - 1];
+      
+      // Verify the requested card matches the top of discard pile
+      if (topCard.id !== action.card.id || 
+          topCard.rank !== action.card.rank || 
+          topCard.suit !== action.card.suit) {
+        console.log('🚨 Draw card mismatch:', {
+          requested: action.card,
+          available: topCard
+        });
+        throw new Error('Requested card does not match top of discard pile');
+      }
+      
+      // Remove card from discard pile and add to player's hand
+      const drawnCard = room.gameState.discardPile.pop()!;
+      player.cards.push(drawnCard);
+      
+      console.log('🃏 Player drew from discard pile:', drawnCard);
+    } else {
+      // Draw from deck (no specific card requested)
+      if (room.gameState.deck.length === 0) {
+        // When deck is empty, end the game and calculate scores
+        console.log('🏁 Deck is empty - ending game and calculating final scores');
+        await this.endGameDueToEmptyDeck(room);
+        // Game is now ended, return without error to allow proper cleanup
+        return;
+      }
 
-    // Draw from deck
-    const drawnCard = room.gameState.deck.pop()!;
-    player.cards.push(drawnCard);
+      const drawnCard = room.gameState.deck.pop()!;
+      player.cards.push(drawnCard);
+      
+      console.log('🃏 Player drew from deck');
+    }
   }
 
   private async handleDiscardAction(room: GameRoom, playerId: string, action: GameAction): Promise<void> {
@@ -801,6 +926,89 @@ export class GameManager {
     const nextIndex = (currentIndex + 1) % room.players.length;
     room.gameState.currentPlayer = room.players[nextIndex].id;
     room.gameState.turnNumber++;
+  }
+
+  /**
+   * End the game when deck is empty and calculate final scores
+   */
+  private async endGameDueToEmptyDeck(room: GameRoom): Promise<void> {
+    console.log('🏁 Ending game due to empty deck - calculating final scores');
+    
+    // Analyze each player's hand and calculate deadwood
+    const playerScores: Array<{
+      player: Player;
+      deadwoodValue: number;
+      analysis: any;
+    }> = [];
+    
+    for (const player of room.players) {
+      const analysis = GinRummyEngine.analyzeHand(player.cards);
+      playerScores.push({
+        player,
+        deadwoodValue: analysis.deadwoodValue,
+        analysis
+      });
+      
+      console.log(`📊 ${player.name} final deadwood: ${analysis.deadwoodValue}`, {
+        melds: analysis.melds.length,
+        deadwoodCards: analysis.deadwood.length
+      });
+    }
+    
+    // Find the player(s) with the lowest deadwood
+    const lowestDeadwood = Math.min(...playerScores.map(ps => ps.deadwoodValue));
+    const winners = playerScores.filter(ps => ps.deadwoodValue === lowestDeadwood);
+    
+    console.log(`🏆 Winner(s) with ${lowestDeadwood} deadwood:`, winners.map(w => w.player.name));
+    
+    // Calculate score differences (in traditional Gin Rummy, winner gets points = opponent's deadwood - winner's deadwood)
+    for (const winner of winners) {
+      const totalOpponentDeadwood = playerScores
+        .filter(ps => ps.player.id !== winner.player.id)
+        .reduce((sum, ps) => sum + ps.deadwoodValue, 0);
+      
+      // In multi-player, give winner the difference between their deadwood and average opponent deadwood
+      const averageOpponentDeadwood = totalOpponentDeadwood / (room.players.length - 1);
+      const pointsEarned = Math.max(0, Math.round(averageOpponentDeadwood - winner.deadwoodValue));
+      
+      winner.player.score += pointsEarned;
+      
+      console.log(`🎯 ${winner.player.name} earns ${pointsEarned} points (${averageOpponentDeadwood.toFixed(1)} avg opponent deadwood - ${winner.deadwoodValue} own deadwood)`);
+    }
+    
+    // Update game state to finished
+    room.gameState.phase = 'finished';
+    room.gameState.finishedAt = new Date();
+    room.gameState.endReason = 'deck-empty';
+    room.gameState.finalScores = playerScores.map(ps => ({
+      playerId: ps.player.id,
+      playerName: ps.player.name,
+      deadwoodValue: ps.deadwoodValue,
+      totalScore: ps.player.score,
+      isWinner: ps.deadwoodValue === lowestDeadwood
+    }));
+    
+    console.log('🎮 Game finished - final scores:', room.gameState.finalScores);
+    
+    // Save the updated room
+    await this.redisService.saveRoom(room);
+    
+    // Emit game end event
+    if (this.io) {
+      this.io.to(room.id).emit('game-ended', {
+        reason: 'deck-empty',
+        message: 'Game ended - deck was empty',
+        finalScores: room.gameState.finalScores,
+        winners: winners.map(w => ({
+          id: w.player.id,
+          name: w.player.name,
+          deadwoodValue: w.deadwoodValue,
+          totalScore: w.player.score
+        }))
+      });
+      
+      console.log('📡 Emitted game-ended event');
+    }
   }
 
   /**
