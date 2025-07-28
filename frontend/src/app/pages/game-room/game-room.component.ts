@@ -824,14 +824,13 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   ngOnInit() {
     this.roomCode = this.route.snapshot.params['code'];
-    console.log('Joining room:', this.roomCode);
     
     // Check if this is a reconnection
     const storedRoomCode = localStorage.getItem('activeRoomCode');
     this.isReconnecting = storedRoomCode === this.roomCode;
     
     if (this.isReconnecting) {
-      console.log('🔄 Reconnecting to existing session...');
+      // Reconnecting to existing session
     }
     
     // Get player name from localStorage (should be set when joining/creating room)
@@ -883,7 +882,7 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.chatContainer.nativeElement.scrollTop = this.chatContainer.nativeElement.scrollHeight;
       }
     } catch (err) {
-      console.log('Chat scroll error:', err);
+      console.error('Chat scroll error:', err);
     }
   }
 
@@ -997,8 +996,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   private updateRoomData(room: GameRoom): void {
     try {
-      console.log('🔄 updateRoomData called with:', room);
-      
       // Add detailed logging for AI player actions
       const playerDetails = room.players?.map(p => ({
         name: p.name,
@@ -1007,19 +1004,8 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         isCurrentPlayer: p.id === room.gameState?.currentPlayer
       }));
       
-      console.log('🎭 All players in room update:', playerDetails);
-      
       // Check if this update is from an AI action
       const currentPlayer = room.players?.find(p => p.id === room.gameState?.currentPlayer);
-      if (currentPlayer?.isAI) {
-        console.log('🤖 AI Player Action Detected:', {
-          aiPlayer: currentPlayer.name,
-          cardCount: currentPlayer.cards?.length,
-          discardPileSize: room.gameState?.discardPile?.length,
-          deckSize: room.gameState?.deck?.length,
-          gamePhase: room.gameState?.phase
-        });
-      }
       
       if (!room) {
         console.error('❌ Room data is null/undefined');
@@ -1048,13 +1034,10 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.gamePhase = 'finished';
       } else {
         // Server says game is finished but we haven't processed it yet
-        console.log('🎮 Server reports game finished, waiting for game end event...');
-        
         // Set a timeout to prevent stuck games - if no game end event comes within 3 seconds,
         // force the game to end with proper score data
         setTimeout(() => {
           if (!this.gameEnded && this.gamePhase !== 'finished') {
-            console.log('🚨 Game end event timeout - forcing game end with current scores');
             this.gamePhase = 'finished';
             this.gameEnded = true;
             this.gameEndReason = 'Game ended';
@@ -1069,9 +1052,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
               // Find winner(s) - player(s) with highest score
               const maxScore = Math.max(...this.currentRoom.players.map(p => p.score || 0));
               this.winners = this.currentRoom.players.filter(p => (p.score || 0) === maxScore);
-              
-              console.log('🏆 Timeout fallback scores:', this.finalScores);
-              console.log('🏆 Timeout fallback winners:', this.winners.map(w => w.name));
             }
             
             this.cdr.detectChanges();
@@ -1116,13 +1096,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         
         // Reset turn state ONLY if it's a new turn (different player)
         if (previousPlayerId !== this.currentPlayerId) {
-          console.log('🔄 Resetting turn state - NEW TURN:', {
-            previousPlayerId,
-            newPlayerId: this.currentPlayerId,
-            isMyTurn: this.currentPlayerId === this.myPlayerId,
-            resetting: true
-          });
-          
           this.hasDrawnThisTurn = false;
           this.currentPhase = 'draw';
           this.selectedCard = null; // Clear any selected card
@@ -1132,25 +1105,8 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
             setTimeout(() => this.autoSortIfNeeded(), 100); // Small delay to ensure cards are updated
           }
           
-          console.log('✅ Turn state reset for new turn:', {
-            hasDrawnThisTurn: this.hasDrawnThisTurn,
-            currentPhase: this.currentPhase
-          });
-          
           // Force change detection for turn transition
           this.cdr.detectChanges();
-        } else if (this.currentPlayerId === this.myPlayerId) {
-          console.log('🎯 Same turn, my turn - keeping state:', {
-            hasDrawnThisTurn: this.hasDrawnThisTurn,
-            currentPhase: this.currentPhase,
-            currentPlayer: this.currentPlayerId,
-            myPlayer: this.myPlayerId
-          });
-        } else {
-          console.log('🎯 Not my turn:', {
-            currentPlayer: this.currentPlayerId,
-            myPlayer: this.myPlayerId
-          });
         }
       }
       
@@ -1164,33 +1120,10 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         // Auto-sort if user has requested sorting
         this.autoSortIfNeeded();
         
-        // Log card changes
-        if (previousMyCards.length !== this.myCards.length) {
-          console.log('🃏 My cards changed:', {
-            previous: previousMyCards.length,
-            current: this.myCards.length,
-            difference: this.myCards.length - previousMyCards.length,
-            action: this.myCards.length > previousMyCards.length ? 'DREW' : 'DISCARDED'
-          });
-        }
-        
         // Count opponent cards (for display purposes) and track changes
         const opponents = this.players.filter(p => p.id !== this.myPlayerId);
         const previousOpponentCards = this.opponentCards;
         this.opponentCards = opponents.length > 0 ? opponents[0].cards?.length || 0 : 0;
-        
-        // Log opponent card changes (indicates AI activity)
-        if (previousOpponentCards !== this.opponentCards) {
-          const opponent = opponents[0];
-          console.log('🤖 Opponent cards changed:', {
-            opponentName: opponent?.name,
-            isAI: opponent?.isAI,
-            previous: previousOpponentCards,
-            current: this.opponentCards,
-            difference: this.opponentCards - previousOpponentCards,
-            action: this.opponentCards > previousOpponentCards ? 'DREW' : 'DISCARDED'
-          });
-        }
         
         // Game state data with proper change detection
         const previousDiscardPile = [...this.discardPile];
@@ -1198,23 +1131,8 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.discardPile = [...newDiscardPile]; // Create new array reference
         this.deckCount = room.gameState?.deck?.length || 0;
         
-        console.log('🗑️ Discard pile state update:', {
-          previousLength: previousDiscardPile.length,
-          newLength: this.discardPile.length,
-          previous: previousDiscardPile.map(c => `${c.rank}${c.suit}`),
-          current: this.discardPile.map(c => `${c.rank}${c.suit}`),
-          changed: previousDiscardPile.length !== this.discardPile.length
-        });
-        
         // Force UI update for discard pile changes
         if (previousDiscardPile.length !== this.discardPile.length) {
-          console.log('🗑️ Discard pile updated - triggering change detection:', {
-            previous: previousDiscardPile.map(c => `${c.rank}${c.suit}`),
-            current: this.discardPile.map(c => `${c.rank}${c.suit}`),
-            added: this.discardPile.length > previousDiscardPile.length ? 
-              this.discardPile[this.discardPile.length - 1] : null
-          });
-          
           // Immediate change detection for discard pile
           this.cdr.detectChanges();
           
@@ -1233,14 +1151,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
       
       // Ensure all UI updates are reflected
       this.cdr.markForCheck();
-      
-      console.log('✅ Room updated with change detection. My player:', { 
-        id: this.myPlayerId, 
-        name: this.myPlayerName, 
-        ready: this.isPlayerReady,
-        currentPlayer: this.currentPlayerId,
-        isMyTurn: this.currentPlayerId === this.myPlayerId
-      });
     } catch (error) {
       console.error('❌ Error in updateRoomData:', error, room);
     }
@@ -1285,14 +1195,12 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   toggleReady() {
     // Don't optimistically update - wait for server confirmation
     this.socketService.togglePlayerReady(this.roomCode);
-    console.log('Requesting ready status toggle...');
   }
 
   startGame() {
     if (!this.canStartGame) return;
     
     this.socketService.startGame(this.roomCode);
-    console.log('Starting game...');
   }
 
   sendChatMessage() {
@@ -1304,17 +1212,14 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   leaveRoom() {
-    console.log('🚪 Showing leave room confirmation...');
     this.showLeaveConfirmation = true;
   }
 
   cancelLeaveRoom() {
-    console.log('🚫 Leave room cancelled by user');
     this.showLeaveConfirmation = false;
   }
 
   confirmLeaveRoom() {
-    console.log('🚪 Leaving room:', this.roomCode);
     this.showLeaveConfirmation = false;
     
     // Clear session data when leaving
@@ -1322,16 +1227,13 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
     localStorage.removeItem('sessionTimestamp');
     localStorage.removeItem('sessionIsAIOnly');
     localStorage.removeItem('currentPlayerName');
-    console.log('🧹 Session data cleared');
     
     try {
       // Leave room via socket
       this.socketService.leaveRoom(this.roomCode);
-      console.log('📡 Socket leave room called');
       
       // Navigate back to home
       this.router.navigate(['/']);
-      console.log('🏠 Navigation to home initiated');
     } catch (error) {
       console.error('❌ Error leaving room:', error);
       // Still try to navigate home even if socket fails
@@ -1547,18 +1449,9 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   // Game action methods
   drawCard(): void {
-    console.log('🎯 drawCard called - before validation:', {
-      hasDrawnThisTurn: this.hasDrawnThisTurn,
-      currentPhase: this.currentPhase,
-      canDraw: this.canDrawCard()
-    });
-    
     if (!this.canDrawCard()) {
-      console.log('❌ Cannot draw card - validation failed');
       return;
     }
-    
-    console.log('🃏 Drawing card...');
     
     // Mark that we've drawn this turn
     this.hasDrawnThisTurn = true;
@@ -1566,11 +1459,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
     
     // Force change detection for UI state updates
     this.cdr.detectChanges();
-    
-    console.log('🎯 After drawing - state updated:', {
-      hasDrawnThisTurn: this.hasDrawnThisTurn,
-      currentPhase: this.currentPhase
-    });
     
     const action = {
       type: 'draw' as const,
@@ -1583,15 +1471,8 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   knockAction(): void {
     if (!this.canKnock()) {
-      console.log('❌ Cannot knock - validation failed');
       return;
     }
-    
-    console.log('✊ Knocking...', {
-      myPlayerId: this.myPlayerId,
-      roomCode: this.roomCode,
-      deadwoodValue: this.myDeadwoodValue
-    });
     
     const action = {
       type: 'knock' as const,
@@ -1599,14 +1480,12 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
       timestamp: new Date()
     };
     
-    console.log('🚀 Sending knock action:', action);
     this.socketService.makeGameAction(this.roomCode, action);
   }
 
   ginAction(): void {
     if (!this.canGin()) return;
     
-    console.log('🥃 Going Gin...');
     const action = {
       type: 'gin' as const,
       playerId: this.myPlayerId,
@@ -1624,17 +1503,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
            !this.hasDrawnThisTurn &&
            this.currentPhase === 'draw';
     
-    if (this.currentRoom?.gameState.currentPlayer === this.myPlayerId) {
-      console.log('🎯 canDrawCard check:', {
-        gamePhase: this.gamePhase,
-        isMyTurn: this.currentRoom?.gameState.currentPlayer === this.myPlayerId,
-        deckCount: this.deckCount,
-        hasDrawnThisTurn: this.hasDrawnThisTurn,
-        currentPhase: this.currentPhase,
-        canDraw
-      });
-    }
-    
     return canDraw;
   }
 
@@ -1649,13 +1517,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
     // Calculate deadwood to determine if knock is valid
     const deadwoodValue = this.calculateDeadwoodValue(this.myCards);
     const canKnockValue = deadwoodValue <= 10;
-    
-    console.log('🎯 canKnock validation:', {
-      isMyTurn: this.currentRoom?.gameState.currentPlayer === this.myPlayerId,
-      cardCount: this.myCards.length,
-      deadwoodValue,
-      canKnock: canKnockValue
-    });
     
     return canKnockValue;
   }
@@ -1833,34 +1694,20 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
       // Select the clicked card
       this.selectedCard = cardIndex;
     }
-    console.log('🃏 Selected card index:', this.selectedCard);
   }
 
   discardSelectedCard(): void {
-    console.log('🎯 discardSelectedCard called:', {
-      selectedCard: this.selectedCard,
-      canDiscard: this.canDiscardCard(),
-      hasDrawnThisTurn: this.hasDrawnThisTurn,
-      currentPhase: this.currentPhase,
-      gamePhase: this.gamePhase,
-      isMyTurn: this.currentRoom?.gameState.currentPlayer === this.myPlayerId
-    });
-    
     if (this.selectedCard === null) {
-      console.log('❌ No card selected');
+      console.error('Cannot discard: No card selected');
       return;
     }
     
     if (!this.canDiscardCard()) {
-      console.log('❌ Cannot discard - validation failed');
-      // Let's try without the strict validation for testing
-      console.log('🧪 Attempting discard anyway for debugging...');
+      console.error('Cannot discard: Validation failed');
+      return;
     }
     
     const cardToDiscard = this.myCards[this.selectedCard];
-    console.log('🗑️ Discarding card:', cardToDiscard);
-    console.log('🎯 Room code:', this.roomCode);
-    console.log('🎯 Player ID:', this.myPlayerId);
     
     const action = {
       type: 'discard' as const,
@@ -1869,7 +1716,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
       timestamp: new Date()
     };
     
-    console.log('🚀 Sending discard action:', action);
     this.socketService.makeGameAction(this.roomCode, action);
     
     // Only clear the selection - let the backend handle turn transition
@@ -1877,8 +1723,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
     
     // Force change detection for UI updates
     this.cdr.detectChanges();
-    
-    console.log('✅ Discard action sent, selection cleared');
   }
 
   canDiscardCard(): boolean {
@@ -1890,26 +1734,11 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
            this.hasDrawnThisTurn &&
            this.currentPhase === 'discard';
     
-    // Debug when trying to discard
-    if (this.selectedCard !== null) {
-      console.log('🎯 canDiscardCard check:', {
-        gamePhase: this.gamePhase,
-        isMyTurn: this.currentRoom?.gameState.currentPlayer === this.myPlayerId,
-        selectedCard: this.selectedCard,
-        hasDrawnThisTurn: this.hasDrawnThisTurn,
-        currentPhase: this.currentPhase,
-        canDiscard,
-        cardCount: this.myCards.length
-      });
-    }
-    
     return canDiscard;
   }
 
   endTurn(): void {
     if (!this.canEndTurn()) return;
-    
-    console.log('⏭️ Ending turn...');
     
     // Reset turn state
     this.hasDrawnThisTurn = false;
@@ -1934,8 +1763,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   sortCards(): void {
-    console.log('🔄 Sorting cards...', this.myCards.map(c => `${c.rank}${c.suit}`));
-    
     // Sort cards by rank first (most important for Gin Rummy), then by suit
     this.myCards.sort((a, b) => {
       // First sort by rank (A=1, 2, 3, ..., 10, J=11, Q=12, K=13)
@@ -1958,8 +1785,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
     // Mark as sorted for future auto-sorting
     this.cardsSorted = true;
-    
-    console.log('✅ Cards sorted by rank first:', this.myCards.map(c => `${c.rank}${c.suit}`));
   }
 
   // Auto-sort cards if the player previously requested sorting
@@ -1968,8 +1793,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
       return;
     }
 
-    console.log('🔄 Auto-sorting cards (user preference)...');
-    
     // Sort cards by rank first (most important for Gin Rummy), then by suit
     this.myCards.sort((a, b) => {
       // First sort by rank (A=1, 2, 3, ..., 10, J=11, Q=12, K=13)
@@ -1989,14 +1812,10 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
       const suitOrder = ['spades', 'hearts', 'diamonds', 'clubs'];
       return suitOrder.indexOf(a.suit) - suitOrder.indexOf(b.suit);
     });
-    
-    console.log('✅ Cards auto-sorted by rank first:', this.myCards.map(c => `${c.rank}${c.suit}`));
   }
 
   drawFromDiscard(): void {
     if (!this.canDrawFromDiscard()) return;
-    
-    console.log('🃏 Drawing from discard pile...');
     
     // Mark that we've drawn this turn
     this.hasDrawnThisTurn = true;
@@ -2030,8 +1849,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
 
     // Only show visual feedback for AI players since human players see their own actions immediately
     if (!player.isAI) return;
-
-    console.log(`🎭 AI Player ${player.name} performed action: ${action.type}`);
 
     // Show a brief animation and message for AI actions
     this.showPlayerActionAnimation(player, action);
@@ -2109,28 +1926,17 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   private handleGameEnded(gameEndData: any): void {
-    console.log('🎮 Game ended event received:', gameEndData);
-    console.log('🎯 Game end reason received:', gameEndData.reason);
-    console.log('🏆 Winners received:', gameEndData.winners);
-    console.log('📊 Final scores received:', gameEndData.finalScores);
-    
     // Update game state
     this.gameEnded = true;
     this.gamePhase = 'finished';
     this.gameEndReason = gameEndData.reason || 'Game ended';
     this.finalScores = gameEndData.finalScores || {};
     
-    // Debug finalScores population
-    console.log('📊 finalScores populated:', this.finalScores);
-    console.log('📊 Object.keys(finalScores):', Object.keys(this.finalScores));
-    console.log('📊 Current room players:', this.currentRoom?.players?.map(p => ({ id: p.id, name: p.name, score: p.score })));
-    
     // Find winners
     if (gameEndData.winners && this.currentRoom) {
       this.winners = this.currentRoom.players.filter(player => 
         gameEndData.winners.includes(player.id)
       );
-      console.log('🏆 Winners populated:', this.winners.map(w => ({ id: w.id, name: w.name })));
     }
     
     // Add chat message based on end reason
@@ -2178,7 +1984,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   getPlayerFinalScore(playerId: string): number {
     // First try to get from finalScores (proper game end data)
     if (this.finalScores && this.finalScores[playerId] !== undefined) {
-      console.log(`💰 Getting score for ${playerId} from finalScores:`, this.finalScores[playerId]);
       return this.finalScores[playerId];
     }
     
@@ -2186,19 +1991,15 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
     if (this.currentRoom) {
       const player = this.currentRoom.players.find(p => p.id === playerId);
       if (player) {
-        console.log(`💰 Getting score for ${playerId} from room data (fallback):`, player.score);
         return player.score || 0;
       }
     }
     
     // Final fallback
-    console.log(`💰 No score found for ${playerId}, using 0`);
     return 0;
   }
 
   getGameEndDisplayMessage(): string {
-    console.log('🎯 getGameEndDisplayMessage called with gameEndReason:', this.gameEndReason);
-    
     if (this.gameEndReason.includes('deck-empty')) {
       return 'The deck ran out of cards!';
     }
@@ -2214,8 +2015,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   getGameOverTitle(): string {
-    console.log('🎯 getGameOverTitle called with gameEndReason:', this.gameEndReason);
-    
     if (this.gameEndReason.includes('gin')) {
       return 'GIN VICTORY!';
     }
@@ -2229,8 +2028,6 @@ export class GameRoomComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   getGameOverSummary(): string {
-    console.log('🎯 getGameOverSummary called with gameEndReason:', this.gameEndReason);
-    
     if (this.gameEndReason.includes('gin')) {
       const winner = this.winners[0];
       return winner ? `${winner.name} achieved Gin with a perfect hand!` : 'Someone achieved Gin!';
